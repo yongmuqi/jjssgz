@@ -1,24 +1,171 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <title>基金实时估值 Pro</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="manifest" href="manifest.json">
-  <style>
-    body {font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial;background:#f6f7f9;padding:12px;}
-    body.dark {background:#121212;color:#eee}
-    .card{max-width:720px;margin:auto;background:#fff;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.08)}
-    body.dark .card{background:#1e1e1e}
-    h1{text-align:center;font-size:22px;margin-bottom:8px}
-    .panel{display:flex;justify-content:space-between;margin:10px 0;font-size:14px}
-    .up{color:#e74c3c}.down{color:#2ecc71}
-    .add{display:flex;gap:8px;margin:12px 0}
-    input{padding:8px;font-size:14px}
-    button{padding:8px 12px;border:none;border-radius:8px;background:#1677ff;color:#fff}
-    button.danger{background:#ff4d4f}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    th,td{border-bottom:1px solid #eee;padding:6px;text-align:center}
-    canvas{margin-top:12px}
-    .time{text-align:center;color:#999;font-size:12px;margin-top:8px}
-  </style
+<meta charset="UTF-8" />
+<title>基金实时估值 Pro</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="manifest" href="manifest.json">
+<style>
+  body {font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial;background:#f6f7f9;padding:12px;}
+  body.dark {background:#121212;color:#eee;}
+  .card{max-width:720px;margin:auto;background:#fff;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.08);}
+  body.dark .card{background:#1e1e1e;}
+  h1{text-align:center;font-size:22px;margin-bottom:8px;}
+  .panel{display:flex;justify-content:space-between;margin:10px 0;font-size:14px;}
+  .up{color:#e74c3c;}
+  .down{color:#2ecc71;}
+  .add{display:flex;gap:8px;margin:12px 0;}
+  input{padding:8px;font-size:14px;}
+  button{padding:8px 12px;border:none;border-radius:8px;background:#1677ff;color:#fff;}
+  button.danger{background:#ff4d4f;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{border-bottom:1px solid #eee;padding:6px;text-align:center;}
+  canvas{margin-top:12px;}
+  .time{text-align:center;color:#999;font-size:12px;margin-top:8px;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>📊 基金实时估值 Pro</h1>
+
+  <div class="panel">
+    <div>总市值：<span id="total">0</span></div>
+    <div>今日盈亏：<span id="today">0</span></div>
+  </div>
+
+  <div class="add">
+    <input id="code" placeholder="基金代码，如 161725" />
+    <button onclick="addFund()">加入</button>
+    <button onclick="toggleDark()">🌙</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>基金</th>
+        <th>估值</th>
+        <th>涨跌</th>
+        <th>份额</th>
+        <th>浮盈</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="list"></tbody>
+  </table>
+
+  <canvas id="chart" height="200"></canvas>
+  <div class="time" id="time"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
+if ('Notification' in window) {
+  Notification.requestPermission();
+}
+
+let funds = JSON.parse(localStorage.getItem('funds') || '[]');
+let pos = JSON.parse(localStorage.getItem('pos') || '{}');
+
+function save() {
+  localStorage.setItem('funds', JSON.stringify(funds));
+  localStorage.setItem('pos', JSON.stringify(pos));
+}
+
+function toggleDark() {
+  document.body.classList.toggle('dark');
+  localStorage.setItem('dark', document.body.classList.contains('dark'));
+}
+if (localStorage.getItem('dark') === 'true') {
+  document.body.classList.add('dark');
+}
+
+function addFund() {
+  const c = code.value.trim();
+  if (!c || funds.includes(c)) return;
+  funds.push(c);
+  save();
+  loadAll();
+}
+
+function removeFund(c) {
+  funds = funds.filter(x => x !== c);
+  delete pos[c];
+  save();
+  loadAll();
+}
+
+function setPos(c, v) {
+  pos[c] = Number(v) || 0;
+  save();
+}
+
+async function getFund(c) {
+  // 国内直接访问天天基金接口
+  const url = `https://fundgz.1234567.com.cn/js/${c}.js?rt=${Math.random()}`;
+  const t = await fetch(url).then(r => r.text());
+  return JSON.parse(t.replace('jsonpgz(', '').replace(');',''));
+}
+
+let chart;
+
+async function loadAll() {
+  let total = 0, today = 0;
+  list.innerHTML = '';
+  let labels = [], data = [];
+
+  for (const c of funds) {
+    try {
+      const f = await getFund(c);
+      const p = pos[c] || 0;
+      const profit = p ? (f.gsz - f.dwjz) * p : 0;
+
+      total += p * f.gsz;
+      today += profit;
+
+      labels.push(f.name);
+      data.push(f.gsz);
+
+      if (Math.abs(f.gszzl) >= 2 && Notification.permission === 'granted') {
+        new Notification('基金波动提醒', {
+          body: `${f.name} 当前 ${f.gszzl}%`
+        });
+      }
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${f.name}</td>
+        <td>${f.gsz}</td>
+        <td class="${f.gszzl >= 0 ? 'up' : 'down'}">${f.gszzl}%</td>
+        <td><input style="width:60px" value="${p}" onchange="setPos('${c}',this.value)"></td>
+        <td class="${profit >= 0 ? 'up' : 'down'}">${profit.toFixed(2)}</td>
+        <td><button class="danger" onclick="removeFund('${c}')">删</button></td>
+      `;
+      list.appendChild(tr);
+      time.innerText = '更新时间：' + f.gztime;
+    } catch(e){
+      console.error(c,e);
+    }
+  }
+
+  totalEl.innerText = total.toFixed(2);
+  todayEl.innerText = today.toFixed(2);
+
+  if(chart) chart.destroy();
+  chart = new Chart(document.getElementById('chart'), {
+    type:'line',
+    data:{labels, datasets:[{data, label:'估值', borderColor:'#1677ff', tension:0.3}]},
+    options:{responsive:true, plugins:{legend:{display:false}}}
+  });
+}
+
+const totalEl = document.getElementById('total');
+const todayEl = document.getElementById('today');
+
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
