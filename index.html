@@ -59,12 +59,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js');
-}
-if ('Notification' in window) {
-  Notification.requestPermission();
-}
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+if ('Notification' in window) { Notification.requestPermission(); }
 
 let funds = JSON.parse(localStorage.getItem('funds') || '[]');
 let pos = JSON.parse(localStorage.getItem('pos') || '{}');
@@ -84,9 +80,11 @@ if (localStorage.getItem('dark') === 'true') {
 
 function addFund() {
   const c = code.value.trim();
-  if (!c || funds.includes(c)) return;
+  if (!c) { alert('请输入基金代码'); return; }
+  if (funds.includes(c)) { alert('基金已存在'); return; }
   funds.push(c);
   save();
+  code.value = '';
   loadAll();
 }
 
@@ -100,16 +98,23 @@ function removeFund(c) {
 function setPos(c, v) {
   pos[c] = Number(v) || 0;
   save();
+  loadAll();
 }
 
 async function getFund(c) {
-  // 国内直接访问天天基金接口
-  const url = `https://fundgz.1234567.com.cn/js/${c}.js?rt=${Math.random()}`;
-  const t = await fetch(url).then(r => r.text());
-  return JSON.parse(t.replace('jsonpgz(', '').replace(');',''));
+  try {
+    const url = `https://fundgz.1234567.com.cn/js/${c}.js?rt=${Math.random()}`;
+    const t = await fetch(url).then(r => r.text());
+    return JSON.parse(t.replace('jsonpgz(','').replace(');',''));
+  } catch(e){
+    console.error('获取基金失败', c, e);
+    return {name:c, gsz:0, dwjz:0, gszzl:0, gztime:'--'};
+  }
 }
 
 let chart;
+const totalEl = document.getElementById('total');
+const todayEl = document.getElementById('today');
 
 async function loadAll() {
   let total = 0, today = 0;
@@ -117,37 +122,29 @@ async function loadAll() {
   let labels = [], data = [];
 
   for (const c of funds) {
-    try {
-      const f = await getFund(c);
-      const p = pos[c] || 0;
-      const profit = p ? (f.gsz - f.dwjz) * p : 0;
+    const f = await getFund(c);
+    const p = pos[c] || 0;
+    const profit = p ? (f.gsz - f.dwjz) * p : 0;
+    total += p * f.gsz;
+    today += profit;
+    labels.push(f.name);
+    data.push(f.gsz);
 
-      total += p * f.gsz;
-      today += profit;
-
-      labels.push(f.name);
-      data.push(f.gsz);
-
-      if (Math.abs(f.gszzl) >= 2 && Notification.permission === 'granted') {
-        new Notification('基金波动提醒', {
-          body: `${f.name} 当前 ${f.gszzl}%`
-        });
-      }
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${f.name}</td>
-        <td>${f.gsz}</td>
-        <td class="${f.gszzl >= 0 ? 'up' : 'down'}">${f.gszzl}%</td>
-        <td><input style="width:60px" value="${p}" onchange="setPos('${c}',this.value)"></td>
-        <td class="${profit >= 0 ? 'up' : 'down'}">${profit.toFixed(2)}</td>
-        <td><button class="danger" onclick="removeFund('${c}')">删</button></td>
-      `;
-      list.appendChild(tr);
-      time.innerText = '更新时间：' + f.gztime;
-    } catch(e){
-      console.error(c,e);
+    if (Math.abs(f.gszzl) >= 2 && Notification.permission === 'granted') {
+      new Notification('基金波动提醒', {body: `${f.name} 当前 ${f.gszzl}%`});
     }
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${f.name}</td>
+      <td>${f.gsz}</td>
+      <td class="${f.gszzl>=0?'up':'down'}">${f.gszzl}%</td>
+      <td><input style="width:60px" value="${p}" onchange="setPos('${c}',this.value)"></td>
+      <td class="${profit>=0?'up':'down'}">${profit.toFixed(2)}</td>
+      <td><button class="danger" onclick="removeFund('${c}')">删</button></td>
+    `;
+    list.appendChild(tr);
+    time.innerText = '更新时间：'+f.gztime;
   }
 
   totalEl.innerText = total.toFixed(2);
@@ -161,11 +158,8 @@ async function loadAll() {
   });
 }
 
-const totalEl = document.getElementById('total');
-const todayEl = document.getElementById('today');
-
 loadAll();
-setInterval(loadAll, 30000);
+setInterval(loadAll,30000);
 </script>
 </body>
 </html>
